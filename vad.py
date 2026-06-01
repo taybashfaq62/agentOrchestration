@@ -1,4 +1,3 @@
-# vad.py
 import torch
 import numpy as np
 import models
@@ -41,15 +40,16 @@ def filter_speech_chunks(
 
     audio_tensor = torch.from_numpy(audio).float()
 
-    speech_timestamps = get_speech_timestamps(
-        audio_tensor,
-        vad_model,
-        threshold=threshold,
-        sampling_rate=SAMPLE_RATE,
-        min_speech_duration_ms=250,
-        min_silence_duration_ms=100,
-        return_seconds=False,
-    )
+    with torch.no_grad():
+        speech_timestamps = get_speech_timestamps(
+            audio_tensor,
+            vad_model,
+            threshold=threshold,
+            sampling_rate=SAMPLE_RATE,
+            min_speech_duration_ms=250,
+            min_silence_duration_ms=100,
+            return_seconds=False,
+        )
     return speech_timestamps  
 
 
@@ -66,5 +66,8 @@ def extract_speech_audio(audio: np.ndarray, threshold: float = 0.5) -> np.ndarra
         return np.array([], dtype=np.float32)
 
     audio_tensor = torch.from_numpy(audio).float()
-    speech_audio = collect_chunks(segments, audio_tensor)
-    return speech_audio.numpy()
+    
+    with torch.no_grad():
+        speech_audio = collect_chunks(segments, audio_tensor)
+        
+    return speech_audio.numpy().astype(np.float32)

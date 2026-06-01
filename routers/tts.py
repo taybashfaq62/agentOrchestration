@@ -2,7 +2,8 @@ from fastapi import APIRouter, Form, HTTPException, Query
 from fastapi.responses import StreamingResponse
 import soundfile as sf
 import numpy as np
-import io, time
+import io
+import time
 import models
 
 router = APIRouter()
@@ -16,7 +17,7 @@ AVAILABLE_VOICES = [
 
 @router.post("/synthesize")
 @router.get("/synthesize")
-async def synthesize(
+def synthesize(
     text: str = Query(None, description="Text to convert to speech (For GET request)"),
     voice: str = Query("af_heart", description="Voice ID (For GET request)"),
     speed: float = Query(1.0, description="Speed multiplier (0.5 - 2.0) (For GET request)"),
@@ -29,6 +30,8 @@ async def synthesize(
     Convert text to speech using Kokoro ONNX.
     Supports both POST (multipart/form-data) and GET (query params) for Swagger UI audio compatibility.
     Returns a WAV audio stream.
+    
+    This route executes on FastAPI's background thread pool to ensure non-blocking server concurrency.
     """
     final_text = text if text is not None else text_form
     final_voice = voice if text is not None else voice_form
@@ -49,26 +52,40 @@ async def synthesize(
     if not 0.5 <= final_speed <= 2.0:
         raise HTTPException(status_code=400, detail="Speed must be between 0.5 and 2.0")
 
-    start = time.perf_counter()
-    kokoro = models.get("kokoro")
+    try:
+        start = time.perf_counter()
+        kokoro = models.get("kokoro")
 
-    samples, sample_rate = kokoro.create(final_text, voice=final_voice, speed=final_speed, lang="en-us")
+        samples, sample_rate = kokoro.create(
+            final_text, 
+            voice=final_voice, 
+            speed=final_speed, 
+            lang="en-us"
+        )
 
-    elapsed = time.perf_counter() - start
+        elapsed = time.perf_counter() - start
+        buf = io.BytesIO()
+        sf.write(buf, samples, sample_rate, format="WAV")
+        buf.seek(0)
 
-    buf = io.BytesIO()
-    sf.write(buf, samples, sample_rate, format="WAV")
-    buf.seek(0)
+        return StreamingResponse(
+            buf,
+            media_type="audio/wav",
+            headers={
+                "X-Latency-Ms": str(round(elapsed * 1000, 1)),
+                "X-Voice": final_voice,
+                "Content-Disposition": "inline; filename=speech.wav"
+            }
+        )
 
-    return StreamingResponse(
-        buf,
-        media_type="audio/wav",
-        headers={
-            "X-Latency-Ms": str(round(elapsed * 1000, 1)),
-            "X-Voice": final_voice,
-            "Content-Disposition": "inline; filename=speech.wav"
-        }
-    )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"TTS Synthesis execution failure: {str(e)}"
+        )
+
 
 @router.get("/voices")
 def list_voices():

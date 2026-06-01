@@ -1,5 +1,3 @@
-# models.py
-
 import torch
 from faster_whisper import WhisperModel
 from moonshine_onnx import MoonshineOnnxModel
@@ -8,6 +6,13 @@ from kokoro_onnx import Kokoro
 _registry = {}
 
 def load_all():
+    """
+    Initializes and caches all models in the global registry.
+    Designed to be invoked exactly once via the FastAPI lifespan startup event.
+    """
+    if _registry:
+        print("Models are already initialized. Skipping redundant loading.")
+        return
 
     print("[1/4] Loading faster-whisper (base.en, CPU int8)...")
     _registry["faster_whisper"] = WhisperModel(
@@ -36,14 +41,40 @@ def load_all():
     _registry["vad"] = vad_model
     _registry["vad_utils"] = vad_utils
 
-    print("✅ All models loaded and ready.")
+    print("All models loaded and ready inside the global registry.")
 
 
-def get(name):
+def clear_all():
+    """
+    Clears the global model registry and runs garbage collection.
+    Designed to be invoked via the FastAPI lifespan shutdown event.
+    """
+    global _registry
+    if not _registry:
+        return
+        
+    print("🧹 Cleaning up model registry resources...")
+    _registry.clear()
+    
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    print("Model registry successfully cleared.")
+
+
+def get(name: str):
+    """
+    Retrieves a loaded model from the registry by its identifier string.
+    """
+    if not _registry:
+        raise RuntimeError(
+            f"The model registry is completely empty. "
+            f"Ensure `models.load_all()` was called at application startup."
+        )
 
     if name not in _registry:
         raise KeyError(
-            f"Model '{name}' not loaded. Available: {list(_registry.keys())}"
+            f"Model '{name}' was not found in the registry. "
+            f"Available models: {list(_registry.keys())}"
         )
 
     return _registry[name]
